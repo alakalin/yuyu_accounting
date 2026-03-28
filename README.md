@@ -42,6 +42,11 @@
    # 打包好的文件位于 build/app/outputs/flutter-apk/app-release.apk
    ```
 
+## 🔐 自动记账权限说明
+- 自动记账依赖 Android 的“通知读取权限”（Notification Listener）。
+- 只有在系统设置中为 `yuyu_记账` 开启通知读取权限后，应用才可自动识别微信/支付宝等支付通知并入账。
+- 若未开启该权限，手动记账和导出功能可正常使用，但自动读取不会生效。
+
 ## 📸 体验亮点
 - 精美的底部导航栏及平滑切换动画。
 - 无闪烁且极速的 SegmentedButton 类型筛选。
@@ -56,8 +61,6 @@
 如果这个项目对你有帮助，欢迎扫码赞助支持持续开发。
 
 ![微信赞助二维码](assets/sponsor_wechat.png)
-
-> 说明: 请将赞助二维码图片保存为 `assets/sponsor_wechat.png`，以便在 GitHub README 中正常显示。
 
 ## 📜 协议 (License)
 使用 MIT License 开源。
