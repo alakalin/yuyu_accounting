@@ -127,6 +127,21 @@ class DatabaseHelper {
     return result.map((map) => Category.fromMap(map)).toList();
   }
 
+  Future<int?> getCategoryIdByNameAndType(String name, int type) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'categories',
+      where: 'name = ? AND type = ?',
+      whereArgs: [name, type],
+      limit: 1,
+    );
+
+    if (result.isEmpty) {
+      return null;
+    }
+    return result.first['id'] as int;
+  }
+
   Future<int> insertTransaction(TransactionRecord transaction) async {
     final db = await instance.database;
     return await db.insert('transactions', transaction.toMap());

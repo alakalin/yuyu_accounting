@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import '../../providers/transaction_provider.dart';
+import '../../core/services/auto_bookkeeping_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -16,6 +17,80 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isExporting = false;
+  bool _isImportingAuto = false;
+  bool _notificationEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshNotificationPermission();
+  }
+
+  Future<void> _refreshNotificationPermission() async {
+    final enabled =
+        await AutoBookkeepingService.isNotificationListenerEnabled();
+    if (!mounted) return;
+    setState(() {
+      _notificationEnabled = enabled;
+    });
+  }
+
+  Future<void> _openNotificationSettings() async {
+    await AutoBookkeepingService.openNotificationListenerSettings();
+    // Give user a moment to return from settings.
+    await Future.delayed(const Duration(milliseconds: 500));
+    await _refreshNotificationPermission();
+  }
+
+  Future<void> _importAutoRecords() async {
+    setState(() => _isImportingAuto = true);
+    try {
+      final records = await AutoBookkeepingService.fetchPendingRecords();
+      if (records.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('当前没有可导入的自动记账通知'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      for (final record in records) {
+        await ref.read(transactionListProvider.notifier).addAutoTransaction(
+              amount: record.amount,
+              type: record.type,
+              categoryName: record.category,
+              timestamp: record.timestamp,
+              note: record.note,
+            );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('自动导入成功：已写入 ${records.length} 条账单'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('自动导入失败: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isImportingAuto = false);
+      }
+    }
+  }
 
   Future<void> _exportData() async {
     setState(() => _isExporting = true);
@@ -47,7 +122,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
         final cateName =
             categories.where((c) => c.id == t.categoryId).firstOrNull?.name ??
-            '未知';
+                '未知';
 
         rows.add([dateStr, typeStr, cateName, t.amount, t.note ?? '']);
       }
@@ -97,6 +172,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
       body: ListView(
         children: [
+          const SizedBox(height: 20),
+          _buildSectionHeader('自动记账（V2）'),
+          _buildCardWrapper(
+            Column(
+              children: [
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.notifications,
+                        color: Colors.purple.shade600),
+                  ),
+                  title: const Text(
+                    '通知监听权限',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text(
+                    _notificationEnabled
+                        ? '已开启，可自动识别微信/支付宝通知'
+                        : '未开启，点击前往系统设置开启',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  trailing: _notificationEnabled
+                      ? const Icon(Icons.check_circle, color: Colors.green)
+                      : const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: _openNotificationSettings,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child:
+                        Icon(Icons.auto_awesome, color: Colors.orange.shade700),
+                  ),
+                  title: const Text(
+                    '导入自动记账通知',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    '将通知识别结果写入账单',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  trailing: _isImportingAuto
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: _isImportingAuto ? null : _importAutoRecords,
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 20),
           _buildSectionHeader('数据管理'),
           _buildCardWrapper(

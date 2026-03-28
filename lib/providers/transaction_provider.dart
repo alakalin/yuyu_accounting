@@ -65,4 +65,44 @@ class TransactionList extends _$TransactionList {
       return _fetchTransactions();
     });
   }
+
+  /// 自动记账导入：按分类名称解析并落库
+  Future<void> addAutoTransaction({
+    required double amount,
+    required int type,
+    required String categoryName,
+    required int timestamp,
+    String? note,
+  }) async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      int? categoryId =
+          await DatabaseHelper.instance.getCategoryIdByNameAndType(
+        categoryName,
+        type,
+      );
+
+      // Fallback category for unexpected parser output.
+      categoryId ??= await DatabaseHelper.instance.getCategoryIdByNameAndType(
+        type == 1 ? '其他' : '日常',
+        type,
+      );
+
+      if (categoryId == null) {
+        throw Exception('未找到可用分类，请先初始化分类数据');
+      }
+
+      await DatabaseHelper.instance.insertTransaction(
+        TransactionRecord(
+          amount: amount,
+          type: type,
+          categoryId: categoryId,
+          timestamp: timestamp,
+          note: note,
+        ),
+      );
+
+      return _fetchTransactions();
+    });
+  }
 }
