@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/transaction_provider.dart';
 import '../../core/services/auto_bookkeeping_service.dart';
 
@@ -16,14 +18,55 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  static const _autoImportKey = 'auto_import_enabled_v21';
+
   bool _isExporting = false;
   bool _isImportingAuto = false;
   bool _notificationEnabled = false;
+  bool _autoImportEnabled = false;
+  Timer? _autoImportTimer;
 
   @override
   void initState() {
     super.initState();
     _refreshNotificationPermission();
+    _loadAutoImportSetting();
+  }
+
+  @override
+  void dispose() {
+    _autoImportTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadAutoImportSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool(_autoImportKey) ?? false;
+    if (!mounted) return;
+    setState(() {
+      _autoImportEnabled = enabled;
+    });
+    _restartAutoImportTimer();
+  }
+
+  Future<void> _setAutoImportEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_autoImportKey, enabled);
+    if (!mounted) return;
+    setState(() {
+      _autoImportEnabled = enabled;
+    });
+    _restartAutoImportTimer();
+  }
+
+  void _restartAutoImportTimer() {
+    _autoImportTimer?.cancel();
+    if (!_autoImportEnabled) return;
+
+    _autoImportTimer = Timer.periodic(const Duration(seconds: 12), (_) async {
+      if (!mounted || !_notificationEnabled) return;
+      await _importAutoRecords(silent: true);
+    });
   }
 
   Future<void> _refreshNotificationPermission() async {
@@ -33,6 +76,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _notificationEnabled = enabled;
     });
+    _restartAutoImportTimer();
   }
 
   Future<void> _openNotificationSettings() async {
@@ -42,12 +86,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _refreshNotificationPermission();
   }
 
-  Future<void> _importAutoRecords() async {
-    setState(() => _isImportingAuto = true);
+  Future<void> _importAutoRecords({bool silent = false}) async {
+    if (_isImportingAuto) return;
+    _isImportingAuto = true;
+    if (!silent) {
+      setState(() {});
+    }
+
     try {
       final records = await AutoBookkeepingService.fetchPendingRecords();
       if (records.isEmpty) {
-        if (mounted) {
+        if (mounted && !silent) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('当前没有可导入的自动记账通知'),
@@ -68,7 +117,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             );
       }
 
-      if (mounted) {
+      if (mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('自动导入成功：已写入 ${records.length} 条账单'),
@@ -77,7 +126,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('自动导入失败: $e'),
@@ -86,9 +135,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       }
     } finally {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() => _isImportingAuto = false);
       }
+      _isImportingAuto = false;
     }
   }
 
@@ -203,6 +253,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onTap: _openNotificationSettings,
                 ),
                 const Divider(height: 1),
+                SwitchListTile(
+                  secondary: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.sync, color: Colors.indigo.shade600),
+                  ),
+                  title: const Text(
+                    '前台自动轮询导入（V2.1）',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    '应用打开时每 12 秒自动拉取通知入账',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  value: _autoImportEnabled,
+                  onChanged: (value) => _setAutoImportEnabled(value),
+                ),
+                const Divider(height: 1),
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(8),
@@ -228,7 +299,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.chevron_right, color: Colors.grey),
-                  onTap: _isImportingAuto ? null : _importAutoRecords,
+                  onTap: _isImportingAuto ? null : () => _importAutoRecords(),
                 ),
               ],
             ),
@@ -279,7 +350,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 '清简记账',
                 style: TextStyle(fontWeight: FontWeight.w500),
               ),
-              subtitle: const Text('版本 1.0.0', style: TextStyle(fontSize: 12)),
+              subtitle: const Text('版本 2.1.0', style: TextStyle(fontSize: 12)),
             ),
           ),
         ],

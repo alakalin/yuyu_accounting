@@ -147,6 +147,26 @@ class DatabaseHelper {
     return await db.insert('transactions', transaction.toMap());
   }
 
+  Future<bool> hasPotentialDuplicateAutoTransaction({
+    required double amount,
+    required int type,
+    required int timestamp,
+  }) async {
+    final db = await instance.database;
+    final minTs = timestamp - 60000;
+    final maxTs = timestamp + 60000;
+
+    final result = await db.query(
+      'transactions',
+      where:
+          'amount = ? AND type = ? AND timestamp BETWEEN ? AND ? AND note LIKE ?',
+      whereArgs: [amount, type, minTs, maxTs, '%通知自动识别%'],
+      limit: 1,
+    );
+
+    return result.isNotEmpty;
+  }
+
   Future<List<TransactionRecord>> getAllTransactions() async {
     final db = await instance.database;
     final result = await db.query('transactions', orderBy: 'timestamp DESC');

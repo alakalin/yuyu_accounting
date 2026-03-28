@@ -76,6 +76,16 @@ class TransactionList extends _$TransactionList {
   }) async {
     state = const AsyncValue.loading();
     state = await AsyncValue.guard(() async {
+      final exists =
+          await DatabaseHelper.instance.hasPotentialDuplicateAutoTransaction(
+        amount: amount,
+        type: type,
+        timestamp: timestamp,
+      );
+      if (exists) {
+        return _fetchTransactions();
+      }
+
       int? categoryId =
           await DatabaseHelper.instance.getCategoryIdByNameAndType(
         categoryName,
