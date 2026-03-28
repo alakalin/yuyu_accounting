@@ -47,6 +47,18 @@
 - 无闪烁且极速的 SegmentedButton 类型筛选。
 - 精准的金额保留 2 位小数和动态百分比计算。
 
+## 👤 作者信息
+- 作者: alakalin
+- GitHub 主页: https://github.com/alakalin
+- 项目地址: https://github.com/alakalin/yuyu_accounting
+
+## 💚 赞助支持
+如果这个项目对你有帮助，欢迎扫码赞助支持持续开发。
+
+![微信赞助二维码](assets/sponsor_wechat.png)
+
+> 说明: 请将赞助二维码图片保存为 `assets/sponsor_wechat.png`，以便在 GitHub README 中正常显示。
+
 ## 📜 协议 (License)
 使用 MIT License 开源。
 
