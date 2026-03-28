@@ -44,6 +44,14 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
 
         appendRecord(record)
         rememberKey(dedupKey, ts)
+        notifyNewRecord()
+    }
+
+    private fun notifyNewRecord() {
+        val intent = android.content.Intent(ACTION_NEW_AUTO_RECORD).apply {
+            `package` = packageName
+        }
+        sendBroadcast(intent)
     }
 
     private fun appendRecord(record: JSONObject) {
@@ -183,6 +191,7 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         const val KEY_PENDING_RECORDS = "pending_records"
         const val KEY_RECENT_KEYS = "recent_dedup_keys"
         const val DEDUP_WINDOW_MS = 60_000L
+        const val ACTION_NEW_AUTO_RECORD = "yuyu.auto_bookkeeping.NEW_RECORD"
 
         val SUPPORTED_PACKAGES = setOf(
             "com.tencent.mm",

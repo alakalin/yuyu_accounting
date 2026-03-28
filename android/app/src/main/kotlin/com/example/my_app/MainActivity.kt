@@ -2,17 +2,49 @@ package com.example.my_app
 
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.provider.Settings
 
 class MainActivity : FlutterActivity() {
 	private val channelName = "yuyu.auto_bookkeeping/channel"
+	private val eventChannelName = "yuyu.auto_bookkeeping/events"
+	private var eventSink: EventChannel.EventSink? = null
+
+	private val recordReceiver = object : BroadcastReceiver() {
+		override fun onReceive(context: Context?, intent: Intent?) {
+			if (intent?.action == NotificationListenerServiceBridge.ACTION_NEW_AUTO_RECORD) {
+				eventSink?.success("new_record")
+			}
+		}
+	}
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
+
+		EventChannel(flutterEngine.dartExecutor.binaryMessenger, eventChannelName)
+			.setStreamHandler(object : EventChannel.StreamHandler {
+				override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+					eventSink = events
+				}
+
+				override fun onCancel(arguments: Any?) {
+					eventSink = null
+				}
+			})
+
+		val filter = IntentFilter(NotificationListenerServiceBridge.ACTION_NEW_AUTO_RECORD)
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			registerReceiver(recordReceiver, filter, RECEIVER_NOT_EXPORTED)
+		} else {
+			registerReceiver(recordReceiver, filter)
+		}
 
 		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
 			.setMethodCallHandler { call, result ->
@@ -38,6 +70,15 @@ class MainActivity : FlutterActivity() {
 					else -> result.notImplemented()
 				}
 			}
+	}
+
+	override fun onDestroy() {
+		try {
+			unregisterReceiver(recordReceiver)
+		} catch (_: Exception) {
+			// ignore
+		}
+		super.onDestroy()
 	}
 
 	private fun isNotificationServiceEnabled(): Boolean {

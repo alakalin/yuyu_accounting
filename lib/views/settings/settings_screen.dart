@@ -19,32 +19,50 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const _autoImportKey = 'auto_import_enabled_v21';
+  static const _autoImportIntervalKey = 'auto_import_interval_seconds_v21';
+  static const _intervalOptions = [8, 12, 20, 30, 60];
 
   bool _isExporting = false;
   bool _isImportingAuto = false;
   bool _notificationEnabled = false;
   bool _autoImportEnabled = false;
+  int _autoImportIntervalSeconds = 12;
   Timer? _autoImportTimer;
+  StreamSubscription<String>? _recordEventSubscription;
 
   @override
   void initState() {
     super.initState();
     _refreshNotificationPermission();
     _loadAutoImportSetting();
+    _listenAutoRecordEvents();
   }
 
   @override
   void dispose() {
     _autoImportTimer?.cancel();
+    _recordEventSubscription?.cancel();
     super.dispose();
+  }
+
+  void _listenAutoRecordEvents() {
+    _recordEventSubscription?.cancel();
+    _recordEventSubscription =
+        AutoBookkeepingService.autoRecordEvents.listen((_) async {
+      if (!mounted || !_notificationEnabled) return;
+      await _importAutoRecords(silent: true);
+    });
   }
 
   Future<void> _loadAutoImportSetting() async {
     final prefs = await SharedPreferences.getInstance();
     final enabled = prefs.getBool(_autoImportKey) ?? false;
+    final interval = prefs.getInt(_autoImportIntervalKey) ?? 12;
+    final safeInterval = _intervalOptions.contains(interval) ? interval : 12;
     if (!mounted) return;
     setState(() {
       _autoImportEnabled = enabled;
+      _autoImportIntervalSeconds = safeInterval;
     });
     _restartAutoImportTimer();
   }
@@ -59,14 +77,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _restartAutoImportTimer();
   }
 
+  Future<void> _setAutoImportInterval(int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_autoImportIntervalKey, seconds);
+    if (!mounted) return;
+    setState(() {
+      _autoImportIntervalSeconds = seconds;
+    });
+    _restartAutoImportTimer();
+  }
+
   void _restartAutoImportTimer() {
     _autoImportTimer?.cancel();
     if (!_autoImportEnabled) return;
 
-    _autoImportTimer = Timer.periodic(const Duration(seconds: 12), (_) async {
-      if (!mounted || !_notificationEnabled) return;
-      await _importAutoRecords(silent: true);
-    });
+    _autoImportTimer = Timer.periodic(
+      Duration(seconds: _autoImportIntervalSeconds),
+      (_) async {
+        if (!mounted || !_notificationEnabled) return;
+        await _importAutoRecords(silent: true);
+      },
+    );
   }
 
   Future<void> _refreshNotificationPermission() async {
@@ -266,12 +297,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     '前台自动轮询导入（V2.1）',
                     style: TextStyle(fontWeight: FontWeight.w500),
                   ),
-                  subtitle: const Text(
-                    '应用打开时每 12 秒自动拉取通知入账',
-                    style: TextStyle(fontSize: 12),
+                  subtitle: Text(
+                    '应用打开时每 $_autoImportIntervalSeconds 秒自动拉取通知入账',
+                    style: const TextStyle(fontSize: 12),
                   ),
                   value: _autoImportEnabled,
                   onChanged: (value) => _setAutoImportEnabled(value),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.timer, color: Colors.teal.shade600),
+                  ),
+                  title: const Text(
+                    '轮询间隔',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    '仅对前台轮询生效，通知触发导入始终开启',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  trailing: DropdownButton<int>(
+                    value: _autoImportIntervalSeconds,
+                    underline: const SizedBox.shrink(),
+                    items: _intervalOptions
+                        .map(
+                          (e) => DropdownMenuItem<int>(
+                            value: e,
+                            child: Text('$e秒'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        _setAutoImportInterval(value);
+                      }
+                    },
+                  ),
                 ),
                 const Divider(height: 1),
                 ListTile(

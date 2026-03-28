@@ -34,6 +34,15 @@ class AutoBookkeepingService {
   static const MethodChannel _channel = MethodChannel(
     'yuyu.auto_bookkeeping/channel',
   );
+  static const EventChannel _eventChannel = EventChannel(
+    'yuyu.auto_bookkeeping/events',
+  );
+
+  static Stream<String> get autoRecordEvents {
+    return _eventChannel
+        .receiveBroadcastStream()
+        .map((event) => event?.toString() ?? 'new_record');
+  }
 
   static Future<bool> openNotificationListenerSettings() async {
     final result = await _channel.invokeMethod<bool>(
