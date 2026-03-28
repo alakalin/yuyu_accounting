@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:csv/csv.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,6 +22,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const _autoImportKey = 'auto_import_enabled_v21';
   static const _autoImportIntervalKey = 'auto_import_interval_seconds_v21';
   static const _intervalOptions = [8, 12, 20, 30, 60];
+  static const _authorName = 'alakalin';
+  static const _githubUrl = 'https://github.com/alakalin/yuyu_accounting';
 
   bool _isExporting = false;
   bool _isImportingAuto = false;
@@ -243,6 +246,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  Future<void> _copyGithubUrl() async {
+    await Clipboard.setData(const ClipboardData(text: _githubUrl));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('GitHub 链接已复制'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -404,20 +418,67 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 20),
           _buildSectionHeader('关于应用'),
           _buildCardWrapper(
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
+            Column(
+              children: [
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child:
+                        Icon(Icons.info_outline, color: Colors.blue.shade600),
+                  ),
+                  title: const Text(
+                    '清简记账',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle:
+                      const Text('版本 2.2.0', style: TextStyle(fontSize: 12)),
                 ),
-                child: Icon(Icons.info_outline, color: Colors.blue.shade600),
-              ),
-              title: const Text(
-                '清简记账',
-                style: TextStyle(fontWeight: FontWeight.w500),
-              ),
-              subtitle: const Text('版本 2.1.0', style: TextStyle(fontSize: 12)),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.deepPurple.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child:
+                        Icon(Icons.person, color: Colors.deepPurple.shade400),
+                  ),
+                  title: const Text(
+                    '作者',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle:
+                      const Text(_authorName, style: TextStyle(fontSize: 12)),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.link),
+                  ),
+                  title: const Text(
+                    'GitHub 项目',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    _githubUrl,
+                    style: TextStyle(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.copy, color: Colors.grey),
+                  onTap: _copyGithubUrl,
+                ),
+              ],
             ),
           ),
         ],
