@@ -1,5 +1,7 @@
 package com.example.my_app
 
+import android.content.ContentValues
+import android.database.sqlite.SQLiteDatabase
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import org.json.JSONArray
@@ -7,6 +9,29 @@ import org.json.JSONObject
 import kotlin.math.abs
 
 class NotificationListenerServiceBridge : NotificationListenerService() {
+    private fun insertDebugLog(pkg: String, title: String, content: String, reason: String) {
+        try {
+            val dbFile = getDatabasePath(DB_FILE_NAME)
+            if (!dbFile.exists()) return
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            try {
+                db.execSQL("CREATE TABLE IF NOT EXISTS debug_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER, pkg TEXT, title TEXT, content TEXT, reason TEXT)")
+                val values = ContentValues().apply {
+                    put("time", System.currentTimeMillis())
+                    put("pkg", pkg)
+                    put("title", title)
+                    put("content", content)
+                    put("reason", reason)
+                }
+                db.insert("debug_logs", null, values)
+            } finally {
+                db.close()
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
@@ -19,19 +44,32 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         val text = extras?.getCharSequence("android.text")?.toString() ?: ""
         val bigText = extras?.getCharSequence("android.bigText")?.toString() ?: ""
         val content = listOf(title, text, bigText).joinToString(" ")
+        
+        insertDebugLog(pkg, title, content, "RAW_RECV")
 
-        val amount = extractAmount(content) ?: return
-        if (amount <= 0.0) return
+        val amount = extractAmount(content)
+        if (amount == null || amount <= 0.0) {
+            insertDebugLog(pkg, title, content, "FAIL: Parse Amount (\$amount)")
+            return
+        }
 
         val type = if (isIncome(content)) 1 else 0
         val category = inferCategory(content, type)
         val ts = sbn.postTime
         val source = sourceName(pkg)
 
-        if (!looksLikeTransaction(content)) return
+        if (!looksLikeTransaction(content)) {
+            insertDebugLog(pkg, title, content, "FAIL: Not Transaction")
+            return
+        }
 
         val dedupKey = buildDedupKey(pkg, title, text, amount, ts)
-        if (isDuplicate(dedupKey, ts)) return
+        if (isDuplicate(dedupKey, ts)) {
+            insertDebugLog(pkg, title, content, "FAIL: Duplicate")
+            return
+        }
+        
+        insertDebugLog(pkg, title, content, "SUCCESS: Valid")
 
         val record = JSONObject().apply {
             put("amount", amount)
@@ -42,7 +80,19 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
             put("sourceApp", pkg)
         }
 
-        appendRecord(record)
+        val directSaved = tryWriteTransactionDirectly(
+            amount = amount,
+            type = type,
+            categoryName = category,
+            timestamp = ts,
+            note = record.optString("note")
+        )
+
+        // Fallback queue for Flutter-side import when direct DB write is unavailable.
+        if (!directSaved) {
+            appendRecord(record)
+        }
+
         rememberKey(dedupKey, ts)
         notifyNewRecord()
     }
@@ -66,6 +116,90 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         shared.edit().putString(KEY_PENDING_RECORDS, array.toString()).apply()
     }
 
+    private fun tryWriteTransactionDirectly(
+        amount: Double,
+        type: Int,
+        categoryName: String,
+        timestamp: Long,
+        note: String
+    ): Boolean {
+        val dbFile = getDatabasePath(DB_FILE_NAME)
+        if (!dbFile.exists()) {
+            return false
+        }
+
+        var db: SQLiteDatabase? = null
+        return try {
+            db = SQLiteDatabase.openDatabase(
+                dbFile.absolutePath,
+                null,
+                SQLiteDatabase.OPEN_READWRITE
+            )
+
+            val categoryId = resolveCategoryId(db, categoryName, type)
+                ?: resolveCategoryId(db, if (type == 1) "其他" else "日常", type)
+                ?: return false
+
+            if (hasDuplicateRecord(db, amount, type, timestamp)) {
+                return true
+            }
+
+            val values = ContentValues().apply {
+                put("amount", amount)
+                put("type", type)
+                put("categoryId", categoryId)
+                put("timestamp", timestamp)
+                put("note", note)
+            }
+
+            db.insert("transactions", null, values) > 0
+        } catch (_: Exception) {
+            false
+        } finally {
+            db?.close()
+        }
+    }
+
+    private fun resolveCategoryId(
+        db: SQLiteDatabase,
+        name: String,
+        type: Int
+    ): Long? {
+        val cursor = db.rawQuery(
+            "SELECT id FROM categories WHERE name = ? AND type = ? LIMIT 1",
+            arrayOf(name, type.toString())
+        )
+        cursor.use {
+            if (it.moveToFirst()) {
+                return it.getLong(0)
+            }
+        }
+        return null
+    }
+
+    private fun hasDuplicateRecord(
+        db: SQLiteDatabase,
+        amount: Double,
+        type: Int,
+        timestamp: Long
+    ): Boolean {
+        val minTs = timestamp - DEDUP_WINDOW_MS
+        val maxTs = timestamp + DEDUP_WINDOW_MS
+        val cursor = db.rawQuery(
+            "SELECT id FROM transactions WHERE amount = ? AND type = ? AND timestamp BETWEEN ? AND ? AND note LIKE ? LIMIT 1",
+            arrayOf(
+                amount.toString(),
+                type.toString(),
+                minTs.toString(),
+                maxTs.toString(),
+                "%通知自动识别%"
+            )
+        )
+        cursor.use {
+            return it.moveToFirst()
+        }
+    }
+
     private fun extractAmount(content: String): Double? {
         val patterns = listOf(
             Regex("(?:实付|支付|付款|扣款|消费|到账|收款|退款)[^0-9¥￥]{0,8}([0-9]+(?:\\.[0-9]{1,2})?)\\s*元"),
@@ -78,10 +212,14 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
     }
 
     private fun looksLikeTransaction(content: String): Boolean {
-        val keywords = listOf(
-            "支付", "付款", "扣款", "消费", "收款", "到账", "入账", "退款", "转账", "账单"
-        )
-        return keywords.any { content.contains(it) }
+        val normalized = content.replace("\\s+".toRegex(), "")
+
+        val hitPositive = TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
+        if (!hitPositive) return false
+
+        // Filter marketing messages that contain money-like text but no real payment.
+        val hitNegative = NON_TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
+        return !hitNegative
     }
 
     private fun isIncome(content: String): Boolean {
@@ -192,6 +330,22 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         const val KEY_RECENT_KEYS = "recent_dedup_keys"
         const val DEDUP_WINDOW_MS = 60_000L
         const val ACTION_NEW_AUTO_RECORD = "yuyu.auto_bookkeeping.NEW_RECORD"
+        const val DB_FILE_NAME = "accounting.db"
+
+        val TRANSACTION_PATTERNS = listOf(
+            Regex("支付成功|付款成功|扣款成功|消费成功"),
+            Regex("微信支付|支付凭证|转账给|向你转账"),
+            Regex("收款成功|收款到账|到账通知|收入"),
+            Regex("退款成功|退款到账"),
+            Regex("实付[¥￥]?[0-9]+(?:\\.[0-9]{1,2})?"),
+            Regex("[¥￥][0-9]+(?:\\.[0-9]{1,2})?"),
+            Regex("[0-9]+(?:\\.[0-9]{1,2})?元")
+        )
+
+        val NON_TRANSACTION_PATTERNS = listOf(
+            Regex("红包封面|优惠券|立减|满减|返现活动"),
+            Regex("广告|营销|推荐|活动通知")
+        )
 
         val SUPPORTED_PACKAGES = setOf(
             "com.tencent.mm",

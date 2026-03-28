@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/transaction_provider.dart';
 import '../../core/services/auto_bookkeeping_service.dart';
+import 'debug_logs_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -30,31 +30,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _notificationEnabled = false;
   bool _autoImportEnabled = false;
   int _autoImportIntervalSeconds = 12;
-  Timer? _autoImportTimer;
-  StreamSubscription<String>? _recordEventSubscription;
 
   @override
   void initState() {
     super.initState();
     _refreshNotificationPermission();
     _loadAutoImportSetting();
-    _listenAutoRecordEvents();
-  }
-
-  @override
-  void dispose() {
-    _autoImportTimer?.cancel();
-    _recordEventSubscription?.cancel();
-    super.dispose();
-  }
-
-  void _listenAutoRecordEvents() {
-    _recordEventSubscription?.cancel();
-    _recordEventSubscription =
-        AutoBookkeepingService.autoRecordEvents.listen((_) async {
-      if (!mounted || !_notificationEnabled) return;
-      await _importAutoRecords(silent: true);
-    });
   }
 
   Future<void> _loadAutoImportSetting() async {
@@ -67,7 +48,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _autoImportEnabled = enabled;
       _autoImportIntervalSeconds = safeInterval;
     });
-    _restartAutoImportTimer();
   }
 
   Future<void> _setAutoImportEnabled(bool enabled) async {
@@ -77,7 +57,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _autoImportEnabled = enabled;
     });
-    _restartAutoImportTimer();
   }
 
   Future<void> _setAutoImportInterval(int seconds) async {
@@ -87,20 +66,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _autoImportIntervalSeconds = seconds;
     });
-    _restartAutoImportTimer();
-  }
-
-  void _restartAutoImportTimer() {
-    _autoImportTimer?.cancel();
-    if (!_autoImportEnabled) return;
-
-    _autoImportTimer = Timer.periodic(
-      Duration(seconds: _autoImportIntervalSeconds),
-      (_) async {
-        if (!mounted || !_notificationEnabled) return;
-        await _importAutoRecords(silent: true);
-      },
-    );
   }
 
   Future<void> _refreshNotificationPermission() async {
@@ -110,7 +75,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     setState(() {
       _notificationEnabled = enabled;
     });
-    _restartAutoImportTimer();
   }
 
   Future<void> _openNotificationSettings() async {
@@ -130,6 +94,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final records = await AutoBookkeepingService.fetchPendingRecords();
       if (records.isEmpty) {
+        ref.invalidate(transactionListProvider);
         if (mounted && !silent) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -381,6 +346,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         )
                       : const Icon(Icons.chevron_right, color: Colors.grey),
                   onTap: _isImportingAuto ? null : () => _importAutoRecords(),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.bug_report, color: Colors.red.shade700),
+                  ),
+                  title: const Text(
+                    '通知捕获诊断日志',
+                    style: TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: const Text(
+                    '排查微信/支付宝遗漏的不入账问题',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DebugLogsScreen(),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
