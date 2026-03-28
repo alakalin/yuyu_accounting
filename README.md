@@ -19,7 +19,7 @@
 - **其他关键工具**: `csv`, `share_plus`, `path_provider`, `intl`, `flutter_launcher_icons`
 
 ## 🚀 快速运行 (Getting Started)
-
+release有apk直装的安装包
 确保您的电脑已经配置好 Flutter 开发环境（SDK 版本 >= 3.2.0）。
 
 1. 克隆本项目：
