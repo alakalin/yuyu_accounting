@@ -1,4 +1,4 @@
-# 🐟 yuyu_记账 (YuYu Accounting)
+﻿# 🌿 yuyu_记账 (YuYu Accounting)
 
 一款基于 Flutter 开发的**纯本地、高颜值** Android 记账应用。采用极简跨界的莫兰迪绿 (Morandi Green) 主题设计，数据完全保存在本地 SQLite 数据库中，无需联网，保护您的绝对隐私。
 
@@ -29,7 +29,7 @@
    ```
 2. 进入项目目录并安装依赖：
    ```bash
-   cd "MY APP"
+   cd "yuyu_accounting"
    flutter pub get
    ```
 3. 在设备上运行（推荐使用 Release 模式体验完整性能）：
@@ -47,8 +47,8 @@
 - 无闪烁且极速的 SegmentedButton 类型筛选。
 - 精准的金额保留 2 位小数和动态百分比计算。
 
-## 📄 协议 (License)
-使用 [MIT License](LICENSE) 开源。
+## 📜 协议 (License)
+使用 MIT License 开源。
 
 ---
-*Built with ❤️ via GitHub Copilot & 创造你的专属记账体验*
+*Built with ❤️ via GitHub Copilot*
