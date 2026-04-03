@@ -428,7 +428,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     style: TextStyle(fontWeight: FontWeight.w500),
                   ),
                   subtitle:
-                      const Text('版本 2.2.0', style: TextStyle(fontSize: 12)),
+                      const Text('版本 2.2.3', style: TextStyle(fontSize: 12)),
                 ),
                 const Divider(height: 1),
                 ListTile(

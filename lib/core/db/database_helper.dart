@@ -19,10 +19,10 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    // 升级数据库 Version 从 1 升至 2 以保证能加载更全的分类列表
+    // Version 3: add expense category "投资" for manual and auto bookkeeping.
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -33,6 +33,13 @@ class DatabaseHelper {
       await db.execute('DROP TABLE IF EXISTS transactions');
       await db.execute('DROP TABLE IF EXISTS categories');
       await _createDB(db, newVersion);
+    }
+
+    if (oldVersion < 3) {
+      await db.execute(
+        "INSERT INTO categories (name, type) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM categories WHERE name = ? AND type = ?)",
+        ['投资', 0, '投资', 0],
+      );
     }
   }
 
@@ -103,6 +110,7 @@ class DatabaseHelper {
       Category(name: '日常', type: 0),
       Category(name: '医疗', type: 0),
       Category(name: '教育', type: 0),
+      Category(name: '投资', type: 0),
       // 收入类别 (1)
       Category(name: '工资', type: 1),
       Category(name: '兼职', type: 1),

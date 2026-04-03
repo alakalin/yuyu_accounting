@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../models/category.dart';
+import '../../models/transaction.dart';
 import '../../providers/transaction_provider.dart';
 import '../../core/utils/icon_util.dart';
 import '../add/add_record_screen.dart';
@@ -60,8 +62,7 @@ class HomeScreen extends ConsumerWidget {
 
                           return categoriesAsyncValue.when(
                             data: (categories) {
-                              final categoryName =
-                                  categories
+                              final categoryName = categories
                                       .where(
                                         (c) => c.id == transaction.categoryId,
                                       )
@@ -110,10 +111,11 @@ class HomeScreen extends ConsumerWidget {
                                     fontSize: 18,
                                   ),
                                 ),
-                                onLongPress: () => _deleteTransaction(
+                                onLongPress: () => _showTransactionActions(
                                   context,
                                   ref,
-                                  transaction.id!,
+                                  transaction,
+                                  categories,
                                 ),
                               );
                             },
@@ -242,6 +244,166 @@ class HomeScreen extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showTransactionActions(
+    BuildContext context,
+    WidgetRef ref,
+    TransactionRecord transaction,
+    List<Category> categories,
+  ) async {
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('编辑这笔账单'),
+                subtitle: const Text('可修改金额、分类和备注'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _editTransaction(
+                    context,
+                    ref,
+                    transaction,
+                    categories,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text('删除这笔账单'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteTransaction(context, ref, transaction.id!);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _editTransaction(
+    BuildContext context,
+    WidgetRef ref,
+    TransactionRecord transaction,
+    List<Category> categories,
+  ) async {
+    final amountController = TextEditingController(
+      text: transaction.amount.toStringAsFixed(2),
+    );
+    final noteController = TextEditingController(text: transaction.note ?? '');
+    final filteredCategories =
+        categories.where((c) => c.type == transaction.type).toList();
+    int selectedCategoryId = transaction.categoryId;
+
+    final updated = await showDialog<TransactionRecord>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('编辑账单'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: amountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: '金额',
+                        prefixText: '¥ ',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<int>(
+                      initialValue: filteredCategories
+                              .any((c) => c.id == selectedCategoryId)
+                          ? selectedCategoryId
+                          : null,
+                      items: filteredCategories
+                          .map(
+                            (c) => DropdownMenuItem<int>(
+                              value: c.id,
+                              child: Text(c.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => selectedCategoryId = value);
+                        }
+                      },
+                      decoration: const InputDecoration(labelText: '分类'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: '备注',
+                        hintText: '可修改自动识别导入的说明文本',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final amount =
+                        double.tryParse(amountController.text.trim());
+                    if (amount == null || amount <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('请输入正确金额')),
+                      );
+                      return;
+                    }
+
+                    Navigator.pop(
+                      ctx,
+                      TransactionRecord(
+                        id: transaction.id,
+                        amount: amount,
+                        type: transaction.type,
+                        categoryId: selectedCategoryId,
+                        timestamp: transaction.timestamp,
+                        note: noteController.text.trim(),
+                      ),
+                    );
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    amountController.dispose();
+    noteController.dispose();
+
+    if (updated == null) return;
+    await ref.read(transactionListProvider.notifier).updateTransaction(updated);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('账单已更新')),
     );
   }
 }

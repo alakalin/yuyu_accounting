@@ -19,6 +19,8 @@ class IconUtil {
         return Icons.local_hospital;
       case '教育':
         return Icons.school;
+      case '投资':
+        return Icons.show_chart;
 
       case '工资':
         return Icons.account_balance_wallet;

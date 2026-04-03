@@ -24,6 +24,20 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
                     put("reason", reason)
                 }
                 db.insert("debug_logs", null, values)
+
+                // Keep debug logs bounded to avoid growing storage usage.
+                val expireBefore = System.currentTimeMillis() - DEBUG_LOG_RETENTION_MS
+                db.delete("debug_logs", "time < ?", arrayOf(expireBefore.toString()))
+                db.execSQL(
+                    """
+                    DELETE FROM debug_logs
+                    WHERE id NOT IN (
+                        SELECT id FROM debug_logs
+                        ORDER BY time DESC
+                        LIMIT $DEBUG_LOG_MAX_ROWS
+                    )
+                    """.trimIndent()
+                )
             } finally {
                 db.close()
             }
@@ -36,8 +50,10 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         if (sbn == null) return
 
         val pkg = sbn.packageName ?: return
-        // Parse payment-related notifications from major payment/ecommerce apps.
-        if (!SUPPORTED_PACKAGES.contains(pkg)) return
+        val source = sourceName(pkg)
+        val bankSource = isBankApp(pkg, source)
+        // Parse payment notifications from supported apps and bank apps.
+        if (!SUPPORTED_PACKAGES.contains(pkg) && !bankSource) return
 
         val extras = sbn.notification.extras
         val title = extras?.getString("android.title") ?: ""
@@ -53,10 +69,14 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
             return
         }
 
+        if (bankSource && !looksLikeBankTransaction(content)) {
+            insertDebugLog(pkg, title, content, "FAIL: Bank Content Not Match")
+            return
+        }
+
         val type = if (isIncome(content)) 1 else 0
         val category = inferCategory(content, type)
         val ts = sbn.postTime
-        val source = sourceName(pkg)
 
         if (!looksLikeTransaction(content)) {
             insertDebugLog(pkg, title, content, "FAIL: Not Transaction")
@@ -204,24 +224,30 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         val patterns = listOf(
             Regex("(?:实付|支付|付款|扣款|消费|到账|收款|退款)[^0-9¥￥]{0,8}([0-9]+(?:\\.[0-9]{1,2})?)\\s*元"),
             Regex("([0-9]+(?:\\.[0-9]{1,2})?)\\s*元"),
-            Regex("[¥￥]\\s*([0-9]+(?:\\.[0-9]{1,2})?)")
+            Regex("[¥￥]\\s*([0-9]+(?:\\.[0-9]{1,2})?)"),
+            Regex("(?:人民币|RMB|CNY)\\s*([0-9]+(?:\\.[0-9]{1,2})?)", RegexOption.IGNORE_CASE),
+            // Handle notifications like "你有一笔17.30的支出" without ￥/元.
+            Regex("(?:一笔|支出|消费|扣款|付款|支付|实付|到账|收款|退款)[^0-9]{0,8}([0-9]+(?:\\.[0-9]{1,2})?)"),
+            Regex("([0-9]+(?:\\.[0-9]{1,2})?)[^0-9]{0,6}(?:的)?(?:支出|消费|扣款|付款|支付|实付|到账|收款|退款)")
         )
         val match = patterns.firstNotNullOfOrNull { it.find(content) }
         val number = match?.groupValues?.getOrNull(1) ?: return null
         return number.toDoubleOrNull()
     }
-
     private fun looksLikeTransaction(content: String): Boolean {
         val normalized = content.replace("\\s+".toRegex(), "")
 
         val hitPositive = TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
-        if (!hitPositive) return false
+        val hitStrongPositive = STRONG_TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
+        if (!hitPositive && !hitStrongPositive) return false
 
         // Filter marketing messages that contain money-like text but no real payment.
         val hitNegative = NON_TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
-        return !hitNegative
-    }
+        if (!hitNegative) return true
 
+        // Keep records when marketing words and clear transaction signals appear together.
+        return hitStrongPositive
+    }
     private fun isIncome(content: String): Boolean {
         val incomeKeywords = listOf("收款", "收入", "到账", "转入", "退款")
         return incomeKeywords.any { content.contains(it) }
@@ -244,8 +270,22 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
             content.contains("电影") || content.contains("游戏") -> "娱乐"
             content.contains("房租") || content.contains("物业") -> "住房"
             content.contains("医院") || content.contains("药") -> "医疗"
+            content.contains("基金") || content.contains("理财") || content.contains("投资") -> "投资"
             else -> "日常"
         }
+    }
+
+    private fun isBankApp(pkg: String, sourceName: String): Boolean {
+        return sourceName.contains("银行") || pkg.contains("bank", ignoreCase = true)
+    }
+
+    private fun looksLikeBankTransaction(content: String): Boolean {
+        val normalized = content.replace("\\s+".toRegex(), "")
+        val hitPositive = BANK_TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
+        if (!hitPositive) return false
+
+        val hitNegative = BANK_NON_TRANSACTION_PATTERNS.any { it.containsMatchIn(normalized) }
+        return !hitNegative
     }
 
     private fun sourceName(pkg: String): String {
@@ -255,7 +295,12 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
             "com.xunmeng.pinduoduo" -> "拼多多"
             "com.jingdong.app.mall" -> "京东"
             "com.taobao.taobao" -> "淘宝"
-            else -> "支付通知"
+            else -> try {
+                val appInfo = packageManager.getApplicationInfo(pkg, 0)
+                packageManager.getApplicationLabel(appInfo).toString()
+            } catch (_: Exception) {
+                pkg
+            }
         }
     }
 
@@ -331,6 +376,8 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         const val DEDUP_WINDOW_MS = 60_000L
         const val ACTION_NEW_AUTO_RECORD = "yuyu.auto_bookkeeping.NEW_RECORD"
         const val DB_FILE_NAME = "accounting.db"
+        const val DEBUG_LOG_RETENTION_MS = 7L * 24 * 60 * 60 * 1000
+        const val DEBUG_LOG_MAX_ROWS = 500
 
         val TRANSACTION_PATTERNS = listOf(
             Regex("支付成功|付款成功|扣款成功|消费成功"),
@@ -344,7 +391,23 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
 
         val NON_TRANSACTION_PATTERNS = listOf(
             Regex("红包封面|优惠券|立减|满减|返现活动"),
-            Regex("广告|营销|推荐|活动通知")
+            Regex("广告|营销|推荐|活动通知"),
+            Regex("签到|领取|点击领取|当天有效|通用红包|视频签到|任务奖励")
+        )
+
+        val STRONG_TRANSACTION_PATTERNS = listOf(
+            Regex("(?:支出|消费|扣款|付款|支付|实付|到账|收款|退款)[^0-9]{0,8}[0-9]+(?:\\.[0-9]{1,2})?"),
+            Regex("[0-9]+(?:\\.[0-9]{1,2})?[^0-9]{0,6}(?:支出|消费|扣款|付款|支付|实付|到账|收款|退款)")
+        )
+        val BANK_TRANSACTION_PATTERNS = listOf(
+            Regex("银行卡|借记卡|信用卡|账户|账户余额"),
+            Regex("收入|入账|到账|支出|扣款|消费|转出|转入|转账|还款|代扣"),
+            Regex("人民币|RMB|CNY|[¥￥][0-9]+(?:\\.[0-9]{1,2})?|[0-9]+(?:\\.[0-9]{1,2})?元")
+        )
+
+        val BANK_NON_TRANSACTION_PATTERNS = listOf(
+            Regex("验证码|动态码|登录|登录提醒|设备登录|人脸|指纹|授权|风控|安全提醒"),
+            Regex("活动|积分|抽奖|升级|权益|营销|广告|推荐")
         )
 
         val SUPPORTED_PACKAGES = setOf(
@@ -356,3 +419,4 @@ class NotificationListenerServiceBridge : NotificationListenerService() {
         )
     }
 }
+
